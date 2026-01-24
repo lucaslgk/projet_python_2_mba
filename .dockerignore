@@ -44,8 +44,10 @@ htmlcov/
 .gitignore
 
 # Documentation
-*.md
 docs/
+
+# Allow README.md for package metadata
+!README.md
 
 # Data files (too large)
 data/*.csv
