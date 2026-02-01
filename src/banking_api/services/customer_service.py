@@ -68,22 +68,31 @@ class CustomerService:
         ValueError
             If customer is not found.
         """
-        df = self.data_loader.get_data().copy()
+        df = self.data_loader.get_data()
 
-        # Parse amount if needed
-        if df['amount'].dtype == 'object':
-            df['amount'] = df['amount'].str.replace('$', '').str.replace(',', '').astype(float)
-
+        # Filter for customer first to reduce data size
         customer_df = df[df['client_id'] == customer_id]
 
         if customer_df.empty:
             raise ValueError(f"Customer {customer_id} not found")
 
+        # Parse amount if needed
+        if customer_df['amount'].dtype == 'object':
+            amounts = customer_df['amount'].str.replace('$', '').str.replace(',', '').astype(float)
+        else:
+            amounts = customer_df['amount']
+
         transactions_count = len(customer_df)
-        avg_amount = float(customer_df['amount'].mean())
-        total_amount = float(customer_df['amount'].sum())
+        avg_amount = float(amounts.mean())
+        total_amount = float(amounts.sum())
         fraud_count = int(customer_df['isFraud'].sum())
         fraudulent = fraud_count > 0
+
+        # Handle NaN values
+        if pd.isna(avg_amount):
+            avg_amount = 0.0
+        if pd.isna(total_amount):
+            total_amount = 0.0
 
         return CustomerProfile(
             id=str(customer_id),
@@ -107,10 +116,11 @@ class CustomerService:
         List[TopCustomer]
             List of top customers sorted by total amount.
         """
-        df = self.data_loader.get_data().copy()
+        df = self.data_loader.get_data()
 
         # Parse amount if needed
         if df['amount'].dtype == 'object':
+            df = df.copy()
             df['amount'] = df['amount'].str.replace('$', '').str.replace(',', '').astype(float)
 
         customer_totals = df.groupby('client_id').agg({
@@ -123,11 +133,16 @@ class CustomerService:
             ascending=False
         ).head(n)
 
-        return [
-            TopCustomer(
+        result = []
+        for _, row in customer_totals.iterrows():
+            total_amount = row['total_amount']
+            if pd.isna(total_amount):
+                total_amount = 0.0
+
+            result.append(TopCustomer(
                 id=str(row['id']),
-                total_amount=float(row['total_amount']),
+                total_amount=float(total_amount),
                 transactions_count=int(row['transactions_count'])
-            )
-            for _, row in customer_totals.iterrows()
-        ]
+            ))
+
+        return result

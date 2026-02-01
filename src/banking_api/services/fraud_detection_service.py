@@ -28,25 +28,31 @@ class FraudDetectionService:
         FraudSummary
             Summary including total frauds, flagged count, and fraud rate.
         """
-        df = self.data_loader.get_data().copy()
+        df = self.data_loader.get_data()
 
-        # Parse amount if needed
+        # Parse amount if needed - use vectorized operations
         if df['amount'].dtype == 'object':
-            df['amount'] = df['amount'].str.replace('$', '').str.replace(',', '').astype(float)
+            amounts = df['amount'].str.replace('$', '').str.replace(',', '').astype(float)
+        else:
+            amounts = df['amount']
 
-        total_frauds = int(df['isFraud'].sum())
-        # No isFlaggedFraud in our dataset, use isFraud as approximation
-        flagged = total_frauds
         total_transactions = len(df)
-        fraud_rate = total_frauds / total_transactions if total_transactions > 0 else 0
+        total_frauds = int(df['isFraud'].sum())
+        flagged = total_frauds
+        fraud_rate = total_frauds / total_transactions if total_transactions > 0 else 0.0
 
-        fraud_df = df[df['isFraud'] == 1]
-        total_fraud_amount = float(fraud_df['amount'].sum()) if len(fraud_df) > 0 else 0.0
+        # Calculate fraud amount using boolean indexing
+        fraud_mask = df['isFraud'] == 1
+        total_fraud_amount = float(amounts[fraud_mask].sum()) if fraud_mask.any() else 0.0
+
+        # Handle NaN
+        if pd.isna(total_fraud_amount):
+            total_fraud_amount = 0.0
 
         return FraudSummary(
             total_frauds=total_frauds,
             flagged=flagged,
-            fraud_rate=fraud_rate,
+            fraud_rate=float(fraud_rate),
             total_fraud_amount=total_fraud_amount
         )
 
@@ -60,17 +66,22 @@ class FraudDetectionService:
         """
         df = self.data_loader.get_data()
 
+        # Use vectorized groupby for better performance
+        grouped = df.groupby('use_chip', dropna=True).agg({
+            'isFraud': ['sum', 'count']
+        }).reset_index()
+
+        grouped.columns = ['type', 'fraud_count', 'total_count']
+
         fraud_stats = []
-        for trans_type in df['use_chip'].dropna().unique():
-            type_df = df[df['use_chip'] == trans_type]
-            fraud_count = int(type_df['isFraud'].sum())
-            total_count = len(type_df)
+        for _, row in grouped.iterrows():
+            fraud_rate = row['fraud_count'] / row['total_count'] if row['total_count'] > 0 else 0.0
 
             fraud_stats.append(FraudByType(
-                type=str(trans_type),
-                fraud_rate=fraud_count / total_count if total_count > 0 else 0,
-                fraud_count=fraud_count,
-                total_count=total_count
+                type=str(row['type']),
+                fraud_rate=float(fraud_rate),
+                fraud_count=int(row['fraud_count']),
+                total_count=int(row['total_count'])
             ))
 
         return sorted(fraud_stats, key=lambda x: x.fraud_rate, reverse=True)
